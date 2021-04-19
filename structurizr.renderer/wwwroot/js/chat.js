@@ -7,7 +7,7 @@ var connection = new signalR.HubConnectionBuilder().withUrl("/chatHub").build();
 connection.on("Refresh", function () {
     console.log("Refresh Image");
     var newImage = document.getElementById("render")
-    newImage.src = "/test.png?" + new Date().getTime();
+    newImage.src = "/reloadimages/temp.png?" + new Date().getTime();
 
 });
 

@@ -4,42 +4,49 @@ using System.Security.Cryptography;
 using System.Management.Automation.Runspaces;
 using Microsoft.AspNetCore.SignalR.Client;
 using System.Threading.Tasks;
-
-
-
 using Microsoft.PowerShell;
 using System.Management.Automation;
-using System.Management.Automation.Runspaces;
 
-
-namespace Test
+namespace thefields.structurizrwatcher
 {
     class Program
     {
-        private static FileSystemWatcher fsw = new System.IO.FileSystemWatcher(@"C:\Users\peter578\Desktop\Test");
+        private static FileSystemWatcher fsw;
         private static string prevHash;
         private static HubConnection connection;
+        private static string pathToWatch;
+        private static string fileToWatch;
+        private static bool reloadEnabled = true;
 
         static async Task Main(string[] args)
         {
-            Console.WriteLine("Hello World!");
+            if (args.Length ==0 || String.IsNullOrWhiteSpace(args[0])) throw new ArgumentException("Path to a file must be supplied as the first command line argument.");
+            if (!System.IO.File.Exists(args[0])) throw new FileNotFoundException(args[0]);
+            fileToWatch = System.IO.Path.GetFileName(args[0]);
+            pathToWatch = System.IO.Path.GetDirectoryName(args[0]);
 
+            fsw = new System.IO.FileSystemWatcher(pathToWatch);
             fsw.NotifyFilter = NotifyFilters.LastWrite;
             fsw.Changed += OnChanged;
-            fsw.Filter = "test.dsl";
+            fsw.Filter = fileToWatch;
 
-            connection = new HubConnectionBuilder()
-                .WithUrl("http://localhost:5000/ChatHub")
-                .Build();
-
-            connection.Closed += async (error) =>
+            try
             {
-                await Task.Delay(new Random().Next(0,5) * 1000);
+                connection = new HubConnectionBuilder()
+                    .WithUrl("http://localhost:5000/ChatHub")
+                    .Build();
+
+                connection.Closed += async (error) => {
+                    await Task.Delay(new Random().Next(0, 5) * 1000);
+                    await connection.StartAsync();
+                };
+
                 await connection.StartAsync();
-            };
-
-            await connection.StartAsync();
-
+            }
+            catch (Exception ex) {
+                Console.WriteLine(ex.Message);
+                reloadEnabled = false;
+            }
             fsw.EnableRaisingEvents = true;
 
             Console.WriteLine("Watching... Press enter to exit.");
@@ -62,12 +69,14 @@ namespace Test
                 {
                     prevHash = hash;
                     Console.Write($"File {e.FullPath} has been updated.  Rendering Image...");
-                    RunScript();
+                    RunScript(e.FullPath);
 
-                    File.Copy(@"C:\Users\peter578\Desktop\Test\test.png", @"C:\Users\peter578\Desktop\Test\web\wwwroot\test.png", true);
+                    File.Copy(@"temp.png", System.IO.Path.Combine(Path.GetTempPath(), "the-fields.rendr-structurizr", "temp.png") , true);
 
                     Console.WriteLine("Done.");
-                    await connection.InvokeAsync("Refresh");
+                    if (reloadEnabled)                    {
+                        await connection.InvokeAsync("Refresh");
+                    }
                 }
             }
             finally
@@ -83,19 +92,18 @@ namespace Test
             return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
         }
 
-        private static void RunScript()
+        private static void RunScript(string path)
         {
-                      InitialSessionState initialSessionState = InitialSessionState.CreateDefault();
-
-                      initialSessionState.ExecutionPolicy = ExecutionPolicy.Unrestricted;
+            InitialSessionState initialSessionState = InitialSessionState.CreateDefault();
+            initialSessionState.ExecutionPolicy = ExecutionPolicy.Unrestricted;
+            File.Copy(@path, @"temp.dsl", true);
 
             using (Runspace runspace = RunspaceFactory.CreateRunspace(initialSessionState))
             {
                 runspace.Open();
-                runspace.SessionStateProxy.Path.SetLocation(@"C:\Users\peter578\Desktop\Test");
                 using (Pipeline pipeline = runspace.CreatePipeline())
                 {
-                    pipeline.Commands.Add(@"C:\Users\peter578\Desktop\Test\run.ps1");
+                    pipeline.Commands.Add(@"scripts\run.ps1");
                     pipeline.Invoke();
                 }
                 runspace.Close();
